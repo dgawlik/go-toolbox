@@ -1,0 +1,13 @@
+
+roots = [
+    "/home/"
+]
+
+excludes = [
+]
+
+followSymlinks = false
+
+verbose = false
+
+
