@@ -1,6 +1,6 @@
 
 roots = [
-    "/home/"
+    "/home/domg/Projekty/recursive-checksum/"
 ]
 
 excludes = [
@@ -8,6 +8,6 @@ excludes = [
 
 followSymlinks = false
 
-verbose = false
+verbose = true
 
 

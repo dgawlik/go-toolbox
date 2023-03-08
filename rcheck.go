@@ -83,10 +83,6 @@ func exhaustRoot(root string, cfg Config) ([]Task, error) {
 			}
 
 			if info.Mode().IsRegular() {
-				if cfg.Verbose {
-					fmt.Printf("%s\n", newPath)
-				}
-
 				files = append(files, Task{newPath})
 			}
 		}
@@ -171,35 +167,41 @@ func main() {
 	for i := 0; i < len(batches); i++ {
 		wg.Add(1)
 
-		i := i
-		go func() {
+		go func(index int) {
 			defer wg.Done()
 
-			work := batches[i]
-
 			var secondLevel []byte
-			for _, task := range work.tasks {
+			for _, task := range batches[index].tasks {
 				hash := getHash(task.absolutePath)
 
-				hashBytes := make([]byte, 8)
-				binary.LittleEndian.PutUint64(hashBytes, hash)
-				secondLevel = append(secondLevel, hashBytes...)
+				if cfg.Verbose {
+					fmt.Printf("%s %X\n", task.absolutePath, hash)
+				}
+
+				secondLevel = binary.LittleEndian.AppendUint64(secondLevel, hash)
 			}
 
-			work.hash = wyhash.Sum64(1, secondLevel)
-		}()
+			batches[index].hash = wyhash.Sum64(1, secondLevel)
+		}(i)
 	}
 
 	wg.Wait()
 
+	if cfg.Verbose {
+		var hashes []uint64
+		for _, b := range batches {
+			hashes = append(hashes, b.hash)
+		}
+
+		fmt.Printf("\nParts: %v\n", hashes)
+	}
+
 	var topLevel []byte
 	for _, batch := range batches {
-		hashBytes := make([]byte, 8)
-		binary.LittleEndian.PutUint64(hashBytes, batch.hash)
-		topLevel = append(topLevel, hashBytes...)
+		topLevel = binary.LittleEndian.AppendUint64(topLevel, batch.hash)
 	}
 
 	result := wyhash.Sum64(1, topLevel)
 
-	fmt.Printf("%X\n", result)
+	fmt.Printf("\n%X\n", result)
 }
