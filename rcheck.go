@@ -1,12 +1,12 @@
 package main
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/gobwas/glob"
@@ -19,11 +19,11 @@ const MAX_BATCH = 24
 
 type Task struct {
 	absolutePath string
+	hash         uint64
 }
 
 type Batch struct {
-	tasks []Task
-	hash  uint64
+	taskIndex []int
 }
 
 type Config struct {
@@ -78,12 +78,10 @@ func exhaustRoot(root string, cfg Config) ([]Task, error) {
 
 			info, err := os.Lstat(newPath)
 
-			if err != nil {
-				panic(err)
-			}
+			check(err)
 
 			if info.Mode().IsRegular() {
-				files = append(files, Task{newPath})
+				files = append(files, Task{newPath, 0})
 			}
 		}
 		return nil
@@ -159,7 +157,12 @@ func main() {
 			end = len(tasks)
 		}
 
-		batches = append(batches, Batch{tasks[it:end], 0})
+		var idx []int
+		for i := it; i < end; i++ {
+			idx = append(idx, i)
+		}
+
+		batches = append(batches, Batch{idx})
 		it = end
 	}
 
@@ -170,38 +173,29 @@ func main() {
 		go func(index int) {
 			defer wg.Done()
 
-			var secondLevel []byte
-			for _, task := range batches[index].tasks {
-				hash := getHash(task.absolutePath)
-
-				if cfg.Verbose {
-					fmt.Printf("%s %X\n", task.absolutePath, hash)
-				}
-
-				secondLevel = binary.LittleEndian.AppendUint64(secondLevel, hash)
+			for _, idx := range batches[index].taskIndex {
+				tasks[idx].hash = getHash(tasks[idx].absolutePath)
 			}
-
-			batches[index].hash = wyhash.Sum64(1, secondLevel)
 		}(i)
 	}
 
 	wg.Wait()
 
-	if cfg.Verbose {
-		var hashes []uint64
-		for _, b := range batches {
-			hashes = append(hashes, b.hash)
+	var sb strings.Builder
+	for _, task := range tasks {
+		s := fmt.Sprintf("%s %X\n", task.absolutePath, task.hash)
+
+		if cfg.Verbose {
+			log := s
+			fmt.Print(log)
 		}
 
-		fmt.Printf("\nParts: %v\n", hashes)
+		sb.WriteString(s)
 	}
 
-	var topLevel []byte
-	for _, batch := range batches {
-		topLevel = binary.LittleEndian.AppendUint64(topLevel, batch.hash)
-	}
+	total := sb.String()
 
-	result := wyhash.Sum64(1, topLevel)
+	result := wyhash.Sum64(1, []byte(total))
 
 	fmt.Printf("\n%X\n", result)
 }
