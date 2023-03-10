@@ -1,11 +1,12 @@
 package main
 
 import (
-	"errors"
+	"flag"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -40,6 +41,9 @@ func check(e error) {
 	}
 }
 
+var configLocation string
+var diffSource string
+
 func matchesExclude(path string, excludes []string) bool {
 	full, base := path, filepath.Base(path)
 
@@ -52,16 +56,6 @@ func matchesExclude(path string, excludes []string) bool {
 	}
 
 	return false
-}
-
-func readArgs(args []string) (string, error) {
-	if len(args) == 0 {
-		return "./config.toml", nil
-	} else if len(args) == 2 && args[0] == "--config" {
-		return args[1], nil
-	} else {
-		return "", errors.New("Usage: prog [--config <path>]")
-	}
 }
 
 func exhaustRoot(root string, cfg Config) ([]Task, error) {
@@ -124,9 +118,10 @@ func resolveFile(path string, followSymlinks bool) string {
 
 func main() {
 
-	args := os.Args[1:]
-	configLocation, err := readArgs(args)
-	check(err)
+	flag.StringVar(&configLocation, "config", "./config.toml", "--config <config location>")
+	flag.StringVar(&diffSource, "diff", "", "--diff <source location>")
+
+	flag.Parse()
 
 	s, err := os.ReadFile(configLocation)
 	check(err)
@@ -193,9 +188,69 @@ func main() {
 		sb.WriteString(s)
 	}
 
-	total := sb.String()
+	if diffSource == "" {
+		total := sb.String()
 
-	result := wyhash.Sum64(1, []byte(total))
+		result := wyhash.Sum64(1, []byte(total))
 
-	fmt.Printf("\n%X\n", result)
+		fmt.Printf("\n%X\n", result)
+	} else {
+		diff, err := os.ReadFile(diffSource)
+		check(err)
+
+		diffStr := string(diff)
+
+		lines := strings.Split(diffStr, "\n")
+
+		orig := make(map[string]Task)
+		for _, t := range tasks {
+			orig[t.absolutePath] = t
+		}
+
+		dif := make(map[string]uint64)
+		for _, l := range lines {
+			if l == "" {
+				break
+			}
+			pair := strings.Split(l, " ")
+			i, err := strconv.ParseUint(pair[1], 16, 0)
+			check(err)
+			dif[pair[0]] = i
+		}
+
+		var added []Task
+		var removed []Task
+		var changed []Task
+
+		for k, v := range orig {
+			_, ok := dif[k]
+
+			if !ok {
+				added = append(added, Task{k, v.hash})
+			}
+		}
+
+		for k, v := range dif {
+			v2, ok := orig[k]
+
+			if !ok {
+				removed = append(removed, Task{k, v2.hash})
+			} else if v2.hash != v {
+				changed = append(changed, Task{k, v2.hash})
+			}
+		}
+
+		for _, t := range added {
+			fmt.Printf("+%s %X\n", t.absolutePath, t.hash)
+		}
+
+		for _, t := range removed {
+			fmt.Printf("-%s %X\n", t.absolutePath, t.hash)
+		}
+
+		for _, t := range changed {
+			fmt.Printf("~%s %X\n", t.absolutePath, t.hash)
+		}
+	}
+
 }

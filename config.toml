@@ -6,7 +6,7 @@ roots = [
 excludes = [
 ]
 
-followSymlinks = false
+followSymlinks = true
 
 verbose = true
 
