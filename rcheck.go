@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,7 +39,6 @@ type RuntimeOptions struct {
 }
 
 const SEED = 1
-const MAX_BATCH = 24
 
 var config Config
 var runtimeOpts RuntimeOptions
@@ -168,6 +169,10 @@ func printDiff(prevList map[string]Task, currList map[string]Task) {
 
 func main() {
 
+	f, err := os.Create(".profile")
+	pprof.StartCPUProfile(f)
+	defer pprof.StopCPUProfile()
+
 	flag.StringVar(&runtimeOpts.configLocation, "config", "./config.toml", "--config <config location>")
 	flag.StringVar(&runtimeOpts.diffSourceLocation, "diff", "", "--diff <source location>")
 
@@ -193,7 +198,7 @@ func main() {
 
 	var batches []Batch
 
-	partSize := (len(tasks) + MAX_BATCH - 1) / MAX_BATCH
+	partSize := (len(tasks) + runtime.NumCPU() - 1) / runtime.NumCPU()
 	for it := 0; it < len(tasks); {
 
 		end := it + partSize
