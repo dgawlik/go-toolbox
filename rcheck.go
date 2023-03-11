@@ -8,14 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"runtime/pprof"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/gobwas/glob"
-	"github.com/orisano/wyhash"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/zhangyunhao116/wyhash"
 )
 
 type Task struct {
@@ -37,8 +36,6 @@ type RuntimeOptions struct {
 	configLocation     string
 	diffSourceLocation string
 }
-
-const SEED = 1
 
 var config Config
 var runtimeOpts RuntimeOptions
@@ -112,7 +109,7 @@ func getHashForFile(path string) uint64 {
 
 	check(err)
 
-	return wyhash.Sum64(SEED, append(s, []byte(path)...))
+	return wyhash.Sum64(append(s, []byte(path)...))
 }
 
 func resolveFile(path string, followSymlinks bool) string {
@@ -169,9 +166,9 @@ func printDiff(prevList map[string]Task, currList map[string]Task) {
 
 func main() {
 
-	f, err := os.Create(".profile")
-	pprof.StartCPUProfile(f)
-	defer pprof.StopCPUProfile()
+	// f, err := os.Create(".profile")
+	// pprof.StartCPUProfile(f)
+	// defer pprof.StopCPUProfile()
 
 	flag.StringVar(&runtimeOpts.configLocation, "config", "./config.toml", "--config <config location>")
 	flag.StringVar(&runtimeOpts.diffSourceLocation, "diff", "", "--diff <source location>")
@@ -247,7 +244,7 @@ func main() {
 	if runtimeOpts.diffSourceLocation == "" {
 		total := sb.String()
 
-		result := wyhash.Sum64(SEED, []byte(total))
+		result := wyhash.Sum64([]byte(total))
 
 		fmt.Printf("%s\n", fmtHex(result))
 	} else {
