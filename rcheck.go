@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -104,12 +105,38 @@ func exhaustRootDirectory(root string, cfg Config) ([]Task, error) {
 	return files, nil
 }
 
-func getHashForFile(path string) uint64 {
-	s, err := os.ReadFile(path)
-
+func getHashForFile(path string, buffer *[]byte) uint64 {
+	f, err := os.Open(path)
 	check(err)
+	defer f.Close()
 
-	return wyhash.Sum64(append(s, []byte(path)...))
+	var size int
+	if info, err := f.Stat(); err == nil {
+		size64 := info.Size()
+		if int64(int(size64)) == size64 {
+			size = int(size64)
+		}
+	}
+	size++
+
+	if size > cap(*buffer) {
+		*buffer = make([]byte, size)
+	}
+
+	ind := 0
+	for {
+		n, err := f.Read((*buffer)[ind:])
+		ind += n
+
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			panic(err)
+		}
+	}
+
+	return wyhash.Sum64((*buffer)[:size])
 }
 
 func resolveFile(path string, followSymlinks bool) string {
@@ -218,9 +245,10 @@ func main() {
 
 		go func(index int) {
 			defer wg.Done()
+			var threadLocalBuffer []byte
 
 			for _, idx := range batches[index] {
-				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath)
+				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath, &threadLocalBuffer)
 			}
 		}(i)
 	}

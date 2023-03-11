@@ -1,13 +1,14 @@
 
 roots = [
-    "/home/domg/Projekty/recursive-checksum/"
+    "/home/domg"
 ]
 
 excludes = [
+    "/home/domg/.mozilla/firefox/**"
 ]
 
 followSymlinks = true
 
-verbose = true
+saveDetailsSnapshot = false
 
 
