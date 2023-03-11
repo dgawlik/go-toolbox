@@ -16,17 +16,12 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
-const SEED = 1
-const MAX_BATCH = 24
-
 type Task struct {
 	absolutePath string
 	hash         uint64
 }
 
-type Batch struct {
-	taskIndex []int
-}
+type Batch []int
 
 type Config struct {
 	Roots               []string
@@ -36,14 +31,22 @@ type Config struct {
 	SaveDetailsSnapshot bool
 }
 
+type RuntimeOptions struct {
+	configLocation     string
+	diffSourceLocation string
+}
+
+const SEED = 1
+const MAX_BATCH = 24
+
+var config Config
+var runtimeOpts RuntimeOptions
+
 func check(e error) {
 	if e != nil {
 		panic(e)
 	}
 }
-
-var configLocation string
-var diffSource string
 
 func fmtHex(num uint64) string {
 	parts := make([]byte, 8)
@@ -75,7 +78,7 @@ func matchesExclude(path string, excludes []string) bool {
 	return false
 }
 
-func exhaustRoot(root string, cfg Config) ([]Task, error) {
+func exhaustRootDirectory(root string, cfg Config) ([]Task, error) {
 	var files []Task
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -98,34 +101,28 @@ func exhaustRoot(root string, cfg Config) ([]Task, error) {
 		return nil
 	})
 
-	if err != nil {
-		return nil, err
-	}
+	check(err)
 
 	return files, nil
 }
 
-func getHash(path string) uint64 {
+func getHashForFile(path string) uint64 {
 	s, err := os.ReadFile(path)
 
 	check(err)
 
-	return wyhash.Sum64(1, append(s, []byte(path)...))
+	return wyhash.Sum64(SEED, append(s, []byte(path)...))
 }
 
 func resolveFile(path string, followSymlinks bool) string {
 	info, err := os.Lstat(path)
 
-	if err != nil {
-		panic(err)
-	}
+	check(err)
 
 	if info.Mode()&fs.ModeSymlink != 0 && followSymlinks {
 		targetPath, err := filepath.EvalSymlinks(path)
 
-		if err != nil {
-			panic(err)
-		}
+		check(err)
 
 		return resolveFile(targetPath, followSymlinks)
 	}
@@ -133,23 +130,58 @@ func resolveFile(path string, followSymlinks bool) string {
 	return path
 }
 
+func printDiff(prevList map[string]Task, currList map[string]Task) {
+	var added []Task
+	var removed []Task
+	var changed []Task
+
+	for k, v := range prevList {
+		_, ok := currList[k]
+
+		if !ok {
+			added = append(added, Task{k, v.hash})
+		}
+	}
+
+	for k, v := range currList {
+		v2, ok := prevList[k]
+
+		if !ok {
+			removed = append(removed, Task{k, v2.hash})
+		} else if v2.hash != v.hash {
+			changed = append(changed, Task{k, v2.hash})
+		}
+	}
+
+	for _, t := range added {
+		fmt.Printf("+%s %X\n", t.absolutePath, t.hash)
+	}
+
+	for _, t := range removed {
+		fmt.Printf("-%s %X\n", t.absolutePath, t.hash)
+	}
+
+	for _, t := range changed {
+		fmt.Printf("~%s %X\n", t.absolutePath, t.hash)
+	}
+}
+
 func main() {
 
-	flag.StringVar(&configLocation, "config", "./config.toml", "--config <config location>")
-	flag.StringVar(&diffSource, "diff", "", "--diff <source location>")
+	flag.StringVar(&runtimeOpts.configLocation, "config", "./config.toml", "--config <config location>")
+	flag.StringVar(&runtimeOpts.diffSourceLocation, "diff", "", "--diff <source location>")
 
 	flag.Parse()
 
-	s, err := os.ReadFile(configLocation)
+	s, err := os.ReadFile(runtimeOpts.configLocation)
 	check(err)
 
-	var cfg Config
-	err = toml.Unmarshal([]byte(s), &cfg)
+	err = toml.Unmarshal([]byte(s), &config)
 	check(err)
 
 	var tasks []Task
-	for _, root := range cfg.Roots {
-		part, err := exhaustRoot(root, cfg)
+	for _, root := range config.Roots {
+		part, err := exhaustRootDirectory(root, config)
 		check(err)
 		tasks = append(tasks, part...)
 	}
@@ -174,7 +206,7 @@ func main() {
 			idx = append(idx, i)
 		}
 
-		batches = append(batches, Batch{idx})
+		batches = append(batches, Batch(idx))
 		it = end
 	}
 
@@ -185,8 +217,8 @@ func main() {
 		go func(index int) {
 			defer wg.Done()
 
-			for _, idx := range batches[index].taskIndex {
-				tasks[idx].hash = getHash(tasks[idx].absolutePath)
+			for _, idx := range batches[index] {
+				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath)
 			}
 		}(i)
 	}
@@ -199,7 +231,7 @@ func main() {
 		sb.WriteString(s)
 	}
 
-	if cfg.SaveDetailsSnapshot {
+	if config.SaveDetailsSnapshot {
 		snapFile, err := os.Create(".snapshot")
 		check(err)
 		fmt.Fprint(snapFile, sb.String())
@@ -207,68 +239,35 @@ func main() {
 		check(err)
 	}
 
-	if diffSource == "" {
+	if runtimeOpts.diffSourceLocation == "" {
 		total := sb.String()
 
-		result := wyhash.Sum64(1, []byte(total))
+		result := wyhash.Sum64(SEED, []byte(total))
 
 		fmt.Printf("%s\n", fmtHex(result))
 	} else {
-		diff, err := os.ReadFile(diffSource)
+		diff, err := os.ReadFile(runtimeOpts.diffSourceLocation)
 		check(err)
 
 		diffStr := string(diff)
 
 		lines := strings.Split(diffStr, "\n")
 
-		orig := make(map[string]Task)
+		prevList := make(map[string]Task)
 		for _, t := range tasks {
-			orig[t.absolutePath] = t
+			prevList[t.absolutePath] = t
 		}
 
-		dif := make(map[string]uint64)
+		currList := make(map[string]Task)
 		for _, l := range lines {
 			pair := strings.Split(l, " ")
 			if len(pair) == 2 {
 				i, err := strconv.ParseUint(pair[1], 16, 0)
 				check(err)
-				dif[pair[0]] = i
+				currList[pair[0]] = Task{pair[0], i}
 			}
 		}
 
-		var added []Task
-		var removed []Task
-		var changed []Task
-
-		for k, v := range orig {
-			_, ok := dif[k]
-
-			if !ok {
-				added = append(added, Task{k, v.hash})
-			}
-		}
-
-		for k, v := range dif {
-			v2, ok := orig[k]
-
-			if !ok {
-				removed = append(removed, Task{k, v2.hash})
-			} else if v2.hash != v {
-				changed = append(changed, Task{k, v2.hash})
-			}
-		}
-
-		for _, t := range added {
-			fmt.Printf("+%s %X\n", t.absolutePath, t.hash)
-		}
-
-		for _, t := range removed {
-			fmt.Printf("-%s %X\n", t.absolutePath, t.hash)
-		}
-
-		for _, t := range changed {
-			fmt.Printf("~%s %X\n", t.absolutePath, t.hash)
-		}
+		printDiff(prevList, currList)
 	}
-
 }
