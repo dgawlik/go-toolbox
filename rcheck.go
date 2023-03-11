@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -28,11 +29,11 @@ type Batch struct {
 }
 
 type Config struct {
-	Roots          []string
-	Excludes       []string
-	Cores          int
-	FollowSymlinks bool
-	Verbose        bool
+	Roots               []string
+	Excludes            []string
+	Cores               int
+	FollowSymlinks      bool
+	SaveDetailsSnapshot bool
 }
 
 func check(e error) {
@@ -43,6 +44,22 @@ func check(e error) {
 
 var configLocation string
 var diffSource string
+
+func fmtHex(num uint64) string {
+	parts := make([]byte, 8)
+	binary.LittleEndian.PutUint64(parts, num)
+
+	var sb strings.Builder
+	for i, b := range parts {
+		sb.WriteString(fmt.Sprintf("%X", b))
+
+		if i < 7 {
+			sb.WriteString(":")
+		}
+	}
+
+	return sb.String()
+}
 
 func matchesExclude(path string, excludes []string) bool {
 	full, base := path, filepath.Base(path)
@@ -179,13 +196,15 @@ func main() {
 	var sb strings.Builder
 	for _, task := range tasks {
 		s := fmt.Sprintf("%s %X\n", task.absolutePath, task.hash)
-
-		if cfg.Verbose {
-			log := s
-			fmt.Print(log)
-		}
-
 		sb.WriteString(s)
+	}
+
+	if cfg.SaveDetailsSnapshot {
+		snapFile, err := os.Create(".snapshot")
+		check(err)
+		fmt.Fprint(snapFile, sb.String())
+		err = snapFile.Close()
+		check(err)
 	}
 
 	if diffSource == "" {
@@ -193,7 +212,7 @@ func main() {
 
 		result := wyhash.Sum64(1, []byte(total))
 
-		fmt.Printf("\n%X\n", result)
+		fmt.Printf("%s\n", fmtHex(result))
 	} else {
 		diff, err := os.ReadFile(diffSource)
 		check(err)
@@ -209,13 +228,12 @@ func main() {
 
 		dif := make(map[string]uint64)
 		for _, l := range lines {
-			if l == "" {
-				break
-			}
 			pair := strings.Split(l, " ")
-			i, err := strconv.ParseUint(pair[1], 16, 0)
-			check(err)
-			dif[pair[0]] = i
+			if len(pair) == 2 {
+				i, err := strconv.ParseUint(pair[1], 16, 0)
+				check(err)
+				dif[pair[0]] = i
+			}
 		}
 
 		var added []Task
