@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"io"
@@ -257,8 +258,11 @@ func main() {
 
 	var sb strings.Builder
 	for _, task := range tasks {
-		s := fmt.Sprintf("%s %X\n", task.absolutePath, task.hash)
-		sb.WriteString(s)
+		sb.WriteString(task.absolutePath + " ")
+		bs := make([]byte, 8)
+		binary.LittleEndian.PutUint64(bs, task.hash)
+		sb.WriteString(hex.EncodeToString(bs))
+		sb.WriteString("\n")
 	}
 
 	if config.SaveDetailsSnapshot {
