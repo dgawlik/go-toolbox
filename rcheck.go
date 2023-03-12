@@ -112,12 +112,14 @@ func getHashForFile(path string, buffer *[]byte) uint64 {
 	defer f.Close()
 
 	var size int
-	if info, err := f.Stat(); err == nil {
-		size64 := info.Size()
-		if int64(int(size64)) == size64 {
-			size = int(size64)
-		}
+	info, err := f.Stat()
+	check(err)
+
+	size64 := info.Size()
+	if int64(int(size64)) == size64 {
+		size = int(size64)
 	}
+
 	size++
 
 	if size > cap(*buffer) {
