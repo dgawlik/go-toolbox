@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -16,7 +17,7 @@ import (
 
 type Task struct {
 	absolutePath string
-	hash         uint64
+	hash         []byte
 }
 
 type Batch []int
@@ -24,6 +25,7 @@ type Batch []int
 var args struct {
 	Strict bool
 	Colon  bool
+	Sha256 bool
 }
 
 func check(path string, err error) {
@@ -36,15 +38,20 @@ func check(path string, err error) {
 	}
 }
 
-func fmtHex(num uint64) string {
-	parts := make([]byte, 8)
-	binary.LittleEndian.PutUint64(parts, num)
+func uint64ToBytes(num uint64) []byte {
+	bt := make([]byte, 8)
+
+	binary.LittleEndian.PutUint64(bt, num)
+	return bt
+}
+
+func fmtHex(num []byte) string {
 
 	var sb strings.Builder
-	for i, b := range parts {
-		sb.WriteString(fmt.Sprintf("%X", b))
+	for i, b := range num {
+		sb.WriteString(fmt.Sprintf("%02X", b))
 
-		if i < 7 {
+		if i < len(num)-1 {
 			sb.WriteString(":")
 		}
 	}
@@ -52,7 +59,7 @@ func fmtHex(num uint64) string {
 	return sb.String()
 }
 
-func getHashForFile(path string, buffer *[]byte) uint64 {
+func getHashForFile(path string, buffer *[]byte, isSha bool) []byte {
 
 	f, err := os.Open(path)
 
@@ -90,7 +97,13 @@ func getHashForFile(path string, buffer *[]byte) uint64 {
 		}
 	}
 
-	return wyhash.Sum64((*buffer)[:size])
+	if isSha {
+		h := sha256.New()
+		h.Write((*buffer)[:size])
+		return h.Sum(nil)
+	} else {
+		return uint64ToBytes(wyhash.Sum64((*buffer)[:size]))
+	}
 }
 
 func main() {
@@ -109,7 +122,13 @@ func main() {
 
 	for _, l := range lines {
 		if l != "" {
-			tasks = append(tasks, Task{l, 0})
+
+			if args.Sha256 {
+				tasks = append(tasks, Task{l, make([]byte, 32)})
+			} else {
+				tasks = append(tasks, Task{l, make([]byte, 8)})
+			}
+
 		}
 	}
 
@@ -146,7 +165,7 @@ func main() {
 			var threadLocalBuffer []byte
 
 			for _, idx := range batches[index] {
-				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath, &threadLocalBuffer)
+				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath, &threadLocalBuffer, args.Sha256)
 			}
 		}(i)
 	}
@@ -158,9 +177,7 @@ func main() {
 		if args.Colon {
 			sb.WriteString(fmtHex(task.hash))
 		} else {
-			bs := make([]byte, 8)
-			binary.LittleEndian.PutUint64(bs, task.hash)
-			sb.WriteString(hex.EncodeToString(bs))
+			sb.WriteString(hex.EncodeToString(task.hash))
 		}
 
 		sb.WriteString(" " + task.absolutePath)
