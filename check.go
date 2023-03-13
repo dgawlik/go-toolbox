@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -21,6 +22,8 @@ type Task struct {
 }
 
 type Batch []int
+
+type Input []string
 
 var args struct {
 	Strict bool
@@ -106,6 +109,18 @@ func getHashForFile(path string, buffer *[]byte, isSha bool) []byte {
 	}
 }
 
+func (i *Input) Len() int {
+	return len(*i)
+}
+
+func (i *Input) Swap(l, r int) {
+	(*i)[l], (*i)[r] = (*i)[r], (*i)[l]
+}
+
+func (i *Input) Less(l, r int) bool {
+	return (*i)[l] < (*i)[r]
+}
+
 func main() {
 
 	arg.MustParse(&args)
@@ -118,7 +133,8 @@ func main() {
 		panic(fmt.Errorf("Error reading stdin"))
 	}
 
-	lines := strings.Split(string(data), "\n")
+	lines := Input(strings.Split(string(data), "\n"))
+	sort.Sort(&lines)
 
 	for _, l := range lines {
 		if l != "" {

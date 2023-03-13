@@ -1,4 +1,4 @@
-module github.com/dgawlik/rcheck
+module github.com/dgawlik/check
 
 go 1.20
 
