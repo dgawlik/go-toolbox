@@ -3,19 +3,14 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
-	"flag"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 
-	"github.com/gobwas/glob"
-	"github.com/pelletier/go-toml/v2"
+	"github.com/alexflint/go-arg"
 	"github.com/zhangyunhao116/wyhash"
 )
 
@@ -26,25 +21,18 @@ type Task struct {
 
 type Batch []int
 
-type Config struct {
-	Roots               []string
-	Excludes            []string
-	Cores               int
-	FollowSymlinks      bool
-	SaveDetailsSnapshot bool
+var args struct {
+	Strict bool
+	Colon  bool
 }
 
-type RuntimeOptions struct {
-	configLocation     string
-	diffSourceLocation string
-}
+func check(path string, err error) {
+	if err != nil {
+		fmt.Printf("%s: %v\n", path, err)
 
-var config Config
-var runtimeOpts RuntimeOptions
-
-func check(e error) {
-	if e != nil {
-		panic(e)
+		if args.Strict {
+			panic(err)
+		}
 	}
 }
 
@@ -64,56 +52,18 @@ func fmtHex(num uint64) string {
 	return sb.String()
 }
 
-func matchesExclude(path string, excludes []string) bool {
-	full, base := path, filepath.Base(path)
-
-	for _, patt := range excludes {
-		g := glob.MustCompile(patt)
-
-		if g.Match(full) || g.Match(base) {
-			return true
-		}
-	}
-
-	return false
-}
-
-func exhaustRootDirectory(root string, cfg Config) ([]Task, error) {
-	var files []Task
-
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			fmt.Printf("%q: %v\n", path, err)
-			return err
-		}
-
-		if !matchesExclude(path, cfg.Excludes) {
-			newPath := resolveFile(path, cfg.FollowSymlinks)
-
-			info, err := os.Lstat(newPath)
-
-			check(err)
-
-			if info.Mode().IsRegular() {
-				files = append(files, Task{newPath, 0})
-			}
-		}
-		return nil
-	})
-
-	check(err)
-
-	return files, nil
-}
-
 func getHashForFile(path string, buffer *[]byte) uint64 {
+
 	f, err := os.Open(path)
-	check(err)
+
+	check(path, err)
+
 	defer f.Close()
 
 	var size int
 	info, err := f.Stat()
-	check(err)
+
+	check(path, err)
 
 	size64 := info.Size()
 	if int64(int(size64)) == size64 {
@@ -135,87 +85,32 @@ func getHashForFile(path string, buffer *[]byte) uint64 {
 			if err == io.EOF {
 				break
 			}
-			panic(err)
+
+			check(path, err)
 		}
 	}
 
 	return wyhash.Sum64((*buffer)[:size])
 }
 
-func resolveFile(path string, followSymlinks bool) string {
-	info, err := os.Lstat(path)
-
-	check(err)
-
-	if info.Mode()&fs.ModeSymlink != 0 && followSymlinks {
-		targetPath, err := filepath.EvalSymlinks(path)
-
-		check(err)
-
-		return resolveFile(targetPath, followSymlinks)
-	}
-
-	return path
-}
-
-func printDiff(prevList map[string]Task, currList map[string]Task) {
-	var added []Task
-	var removed []Task
-	var changed []Task
-
-	for k, v := range prevList {
-		_, ok := currList[k]
-
-		if !ok {
-			added = append(added, Task{k, v.hash})
-		}
-	}
-
-	for k, v := range currList {
-		v2, ok := prevList[k]
-
-		if !ok {
-			removed = append(removed, Task{k, v2.hash})
-		} else if v2.hash != v.hash {
-			changed = append(changed, Task{k, v2.hash})
-		}
-	}
-
-	for _, t := range added {
-		fmt.Printf("+%s %X\n", t.absolutePath, t.hash)
-	}
-
-	for _, t := range removed {
-		fmt.Printf("-%s %X\n", t.absolutePath, t.hash)
-	}
-
-	for _, t := range changed {
-		fmt.Printf("~%s %X\n", t.absolutePath, t.hash)
-	}
-}
-
 func main() {
 
-	// f, err := os.Create(".profile")
-	// pprof.StartCPUProfile(f)
-	// defer pprof.StopCPUProfile()
-
-	flag.StringVar(&runtimeOpts.configLocation, "config", "./config.toml", "--config <config location>")
-	flag.StringVar(&runtimeOpts.diffSourceLocation, "diff", "", "--diff <source location>")
-
-	flag.Parse()
-
-	s, err := os.ReadFile(runtimeOpts.configLocation)
-	check(err)
-
-	err = toml.Unmarshal([]byte(s), &config)
-	check(err)
+	arg.MustParse(&args)
 
 	var tasks []Task
-	for _, root := range config.Roots {
-		part, err := exhaustRootDirectory(root, config)
-		check(err)
-		tasks = append(tasks, part...)
+
+	data, err := io.ReadAll(os.Stdin)
+
+	if err != nil {
+		panic(fmt.Errorf("Error reading stdin"))
+	}
+
+	lines := strings.Split(string(data), "\n")
+
+	for _, l := range lines {
+		if l != "" {
+			tasks = append(tasks, Task{l, 0})
+		}
 	}
 
 	if len(tasks) == 0 {
@@ -260,50 +155,18 @@ func main() {
 
 	var sb strings.Builder
 	for _, task := range tasks {
-		sb.WriteString(task.absolutePath + " ")
-		bs := make([]byte, 8)
-		binary.LittleEndian.PutUint64(bs, task.hash)
-		sb.WriteString(hex.EncodeToString(bs))
+		if args.Colon {
+			sb.WriteString(fmtHex(task.hash))
+		} else {
+			bs := make([]byte, 8)
+			binary.LittleEndian.PutUint64(bs, task.hash)
+			sb.WriteString(hex.EncodeToString(bs))
+		}
+
+		sb.WriteString(" " + task.absolutePath)
+
 		sb.WriteString("\n")
 	}
 
-	if config.SaveDetailsSnapshot {
-		snapFile, err := os.Create(".snapshot")
-		check(err)
-		fmt.Fprint(snapFile, sb.String())
-		err = snapFile.Close()
-		check(err)
-	}
-
-	if runtimeOpts.diffSourceLocation == "" {
-		total := sb.String()
-
-		result := wyhash.Sum64([]byte(total))
-
-		fmt.Printf("%s\n", fmtHex(result))
-	} else {
-		diff, err := os.ReadFile(runtimeOpts.diffSourceLocation)
-		check(err)
-
-		diffStr := string(diff)
-
-		lines := strings.Split(diffStr, "\n")
-
-		prevList := make(map[string]Task)
-		for _, t := range tasks {
-			prevList[t.absolutePath] = t
-		}
-
-		currList := make(map[string]Task)
-		for _, l := range lines {
-			pair := strings.Split(l, " ")
-			if len(pair) == 2 {
-				i, err := strconv.ParseUint(pair[1], 16, 0)
-				check(err)
-				currList[pair[0]] = Task{pair[0], i}
-			}
-		}
-
-		printDiff(prevList, currList)
-	}
+	fmt.Print(sb.String())
 }

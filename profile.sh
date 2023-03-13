@@ -1,1 +1,0 @@
-go tool pprof rcheck .profile

@@ -2,9 +2,11 @@ module github.com/dgawlik/rcheck
 
 go 1.20
 
+require github.com/alexflint/go-arg v1.4.3
+
 require (
-	github.com/gobwas/glob v0.2.3
-	github.com/pelletier/go-toml/v2 v2.0.7
+	github.com/alexflint/go-scalar v1.1.0 // indirect
+	github.com/stretchr/testify v1.8.1 // indirect
 )
 
 require (
