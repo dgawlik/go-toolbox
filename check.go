@@ -26,7 +26,6 @@ type Batch []int
 type Input []string
 
 var args struct {
-	Strict bool
 	Colon  bool
 	Sha256 bool
 }
@@ -35,9 +34,7 @@ func check(path string, err error) {
 	if err != nil {
 		fmt.Printf("%s: %v\n", path, err)
 
-		if args.Strict {
-			panic(err)
-		}
+		panic(err)
 	}
 }
 
@@ -62,50 +59,20 @@ func fmtHex(num []byte) string {
 	return sb.String()
 }
 
-func getHashForFile(path string, buffer *[]byte, isSha bool) []byte {
+func getHashForFile(path string, isSha bool) []byte {
 
-	f, err := os.Open(path)
-
-	check(path, err)
-
-	defer f.Close()
-
-	var size int
-	info, err := f.Stat()
+	buffer, err := os.ReadFile(path)
 
 	check(path, err)
-
-	size64 := info.Size()
-	if int64(int(size64)) == size64 {
-		size = int(size64)
-	}
-
-	size++
-
-	if size > cap(*buffer) {
-		*buffer = make([]byte, size)
-	}
-
-	ind := 0
-	for {
-		n, err := f.Read((*buffer)[ind:])
-		ind += n
-
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-
-			check(path, err)
-		}
-	}
 
 	if isSha {
 		h := sha256.New()
-		h.Write((*buffer)[:size])
+		h.Write(buffer)
 		return h.Sum(nil)
 	} else {
-		return uint64ToBytes(wyhash.Sum64((*buffer)[:size]))
+		h := wyhash.NewDefault()
+		h.Write(buffer)
+		return uint64ToBytes(h.Sum64())
 	}
 }
 
@@ -178,10 +145,9 @@ func main() {
 
 		go func(index int) {
 			defer wg.Done()
-			var threadLocalBuffer []byte
 
 			for _, idx := range batches[index] {
-				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath, &threadLocalBuffer, args.Sha256)
+				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath, args.Sha256)
 			}
 		}(i)
 	}
