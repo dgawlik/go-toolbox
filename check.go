@@ -21,7 +21,10 @@ type Task struct {
 	hash         []byte
 }
 
-type Batch []int
+type Batch struct {
+	Tasks      []Task
+	FileBuffer []byte
+}
 
 type Input []string
 
@@ -59,19 +62,43 @@ func fmtHex(num []byte) string {
 	return sb.String()
 }
 
-func getHashForFile(path string, isSha bool) []byte {
+func getHashForFile(path string, buffer *[]byte, isSha bool) []byte {
 
-	buffer, err := os.ReadFile(path)
+	f, err := os.Open(path)
+	check(path, err)
+	defer f.Close()
+
+	info, err := f.Stat()
+	check(path, err)
+	size := int(info.Size()) + 1
+
+	if size > cap(*buffer) {
+		*buffer = make([]byte, size)
+	}
+
+	data := (*buffer)[:0]
+
+	err = nil
+	for {
+		n, err := f.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			break
+		}
+	}
 
 	check(path, err)
 
 	if isSha {
 		h := sha256.New()
-		h.Write(buffer)
+		h.Write(data)
 		return h.Sum(nil)
 	} else {
 		h := wyhash.NewDefault()
-		h.Write(buffer)
+		h.Write(data)
 		return uint64ToBytes(h.Sum64())
 	}
 }
@@ -130,12 +157,9 @@ func main() {
 			end = len(tasks)
 		}
 
-		var idx []int
-		for i := it; i < end; i++ {
-			idx = append(idx, i)
-		}
+		batch := Batch{tasks[it:end], make([]byte, 4096)}
 
-		batches = append(batches, Batch(idx))
+		batches = append(batches, batch)
 		it = end
 	}
 
@@ -143,13 +167,13 @@ func main() {
 	for i := 0; i < len(batches); i++ {
 		wg.Add(1)
 
-		go func(index int) {
+		go func(b *Batch) {
 			defer wg.Done()
 
-			for _, idx := range batches[index] {
-				tasks[idx].hash = getHashForFile(tasks[idx].absolutePath, args.Sha256)
+			for idx, _ := range b.Tasks {
+				b.Tasks[idx].hash = getHashForFile(b.Tasks[idx].absolutePath, &b.FileBuffer, args.Sha256)
 			}
-		}(i)
+		}(&batches[i])
 	}
 
 	wg.Wait()

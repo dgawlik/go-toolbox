@@ -97,16 +97,16 @@ Wyhash:
 ```
 domg@asus:~/Projekty/recursive-checksum$ time cat toscan | ./check  > 1.txt
 
-real    0m10,098s
-user    0m2,686s
-sys     0m10,797s
+real    0m5,489s
+user    0m1,850s
+sys     0m6,098s
 ```
 
 Sha256
 ```
 domg@asus:~/Projekty/recursive-checksum$ time cat toscan | ./check --sha256  > 1.txt
 
-real    0m17,705s
-user    0m33,343s
-sys     0m7,498s
+real    0m14,624s
+user    0m33,201s
+sys     0m5,935s
 ```
