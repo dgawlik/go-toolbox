@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -48,7 +47,14 @@ func check(path string, err error) {
 func uint64ToBytes(num uint64) []byte {
 	bt := make([]byte, 8)
 
-	binary.LittleEndian.PutUint64(bt, num)
+	bt[0] = byte(num)
+	bt[1] = byte(num >> 8)
+	bt[2] = byte(num >> 16)
+	bt[3] = byte(num >> 24)
+	bt[4] = byte(num >> 32)
+	bt[5] = byte(num >> 40)
+	bt[6] = byte(num >> 48)
+	bt[7] = byte(num >> 56)
 	return bt
 }
 
@@ -102,9 +108,7 @@ func getHashForFile(path string, buffer *[]byte, args Args) []byte {
 		return h.Sum(nil)
 	} else if args.Xxh3 {
 		h := xxh3.HashSeed(data, 1)
-		bt := make([]byte, 8)
-		binary.BigEndian.PutUint64(bt, h)
-		return bt
+		return uint64ToBytes(h)
 	} else {
 		h := wyhash.NewDefault()
 		h.Write(data)
