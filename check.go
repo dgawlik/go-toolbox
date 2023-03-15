@@ -13,6 +13,7 @@ import (
 	"sync"
 
 	"github.com/alexflint/go-arg"
+	"github.com/zeebo/xxh3"
 	"github.com/zhangyunhao116/wyhash"
 )
 
@@ -28,10 +29,13 @@ type Batch struct {
 
 type Input []string
 
-var args struct {
+type Args struct {
 	Colon  bool
 	Sha256 bool
+	Xxh3   bool
 }
+
+var args Args
 
 func check(path string, err error) {
 	if err != nil {
@@ -62,7 +66,7 @@ func fmtHex(num []byte) string {
 	return sb.String()
 }
 
-func getHashForFile(path string, buffer *[]byte, isSha bool) []byte {
+func getHashForFile(path string, buffer *[]byte, args Args) []byte {
 
 	f, err := os.Open(path)
 	check(path, err)
@@ -92,10 +96,15 @@ func getHashForFile(path string, buffer *[]byte, isSha bool) []byte {
 
 	check(path, err)
 
-	if isSha {
+	if args.Sha256 {
 		h := sha256.New()
 		h.Write(data)
 		return h.Sum(nil)
+	} else if args.Xxh3 {
+		h := xxh3.HashSeed(data, 1)
+		bt := make([]byte, 8)
+		binary.BigEndian.PutUint64(bt, h)
+		return bt
 	} else {
 		h := wyhash.NewDefault()
 		h.Write(data)
@@ -171,7 +180,7 @@ func main() {
 			defer wg.Done()
 
 			for idx, _ := range b.Tasks {
-				b.Tasks[idx].hash = getHashForFile(b.Tasks[idx].absolutePath, &b.FileBuffer, args.Sha256)
+				b.Tasks[idx].hash = getHashForFile(b.Tasks[idx].absolutePath, &b.FileBuffer, args)
 			}
 		}(&batches[i])
 	}
