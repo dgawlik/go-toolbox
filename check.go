@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"runtime"
+	"runtime/pprof"
 	"sort"
 	"strings"
 	"sync"
 
 	"github.com/alexflint/go-arg"
+	"github.com/dgryski/go-metro"
 	"github.com/zeebo/xxh3"
 	"github.com/zhangyunhao116/wyhash"
 	"github.com/zhenjl/cityhash"
@@ -30,10 +32,12 @@ type Batch struct {
 type Input []string
 
 type Args struct {
-	Colon  bool
-	Sha256 bool
-	Xxh3   bool
-	City   bool
+	Colon      bool
+	Cpuprofile bool
+	Sha256     bool
+	Xxh3       bool
+	City       bool
+	Metro      bool
 }
 
 var args Args
@@ -114,6 +118,9 @@ func getHashForFile(path string, buffer *[]byte, args Args) []byte {
 	} else if args.City {
 		h := cityhash.CityHash64WithSeed(data, uint32(len(data)), 1)
 		return uint64ToBytes(h)
+	} else if args.Metro {
+		h := metro.Hash64(data, 1)
+		return uint64ToBytes(h)
 	} else {
 		h := wyhash.NewDefault()
 		h.Write(data)
@@ -136,6 +143,15 @@ func (i *Input) Less(l, r int) bool {
 func main() {
 
 	arg.MustParse(&args)
+
+	if args.Cpuprofile {
+		f, err := os.Create(".profile")
+		if err != nil {
+			panic(err)
+		}
+		pprof.StartCPUProfile(f)
+		defer pprof.StopCPUProfile()
+	}
 
 	var tasks []Task
 
