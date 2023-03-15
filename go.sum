@@ -25,6 +25,8 @@ github.com/zhangyunhao116/sbconv v0.2.1 h1:9Z43QFpnkYNjCrRz8UR9ShVRVQ0OG5VtLKQ3m
 github.com/zhangyunhao116/sbconv v0.2.1/go.mod h1:pdAXGnJGNM68XNdJOfGCelkEHgrQMWSeW/2/qKjuiQQ=
 github.com/zhangyunhao116/wyhash v0.4.0 h1:w/mkH+okJy4MvmQFojNbyW+5WAy+dF9TDB/0RW2xuYk=
 github.com/zhangyunhao116/wyhash v0.4.0/go.mod h1:9okT6cr1VZK9N3Tv0I6qUYDNtQgOfcQgfMRCEXt9d8I=
+github.com/zhenjl/cityhash v0.0.0-20131128155616-cdd6a94144ab h1:BWHvAOZz0pBILkGl/ebPQKZDrqbaWj/iN9RE8AvaTvg=
+github.com/zhenjl/cityhash v0.0.0-20131128155616-cdd6a94144ab/go.mod h1:P6L88wrqK99Njntah9SB7AyzFpUXsXYq06LkjixxQmY=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=

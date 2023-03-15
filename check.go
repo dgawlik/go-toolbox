@@ -14,6 +14,7 @@ import (
 	"github.com/alexflint/go-arg"
 	"github.com/zeebo/xxh3"
 	"github.com/zhangyunhao116/wyhash"
+	"github.com/zhenjl/cityhash"
 )
 
 type Task struct {
@@ -32,6 +33,7 @@ type Args struct {
 	Colon  bool
 	Sha256 bool
 	Xxh3   bool
+	City   bool
 }
 
 var args Args
@@ -108,6 +110,9 @@ func getHashForFile(path string, buffer *[]byte, args Args) []byte {
 		return h.Sum(nil)
 	} else if args.Xxh3 {
 		h := xxh3.HashSeed(data, 1)
+		return uint64ToBytes(h)
+	} else if args.City {
+		h := cityhash.CityHash64WithSeed(data, uint32(len(data)), 1)
 		return uint64ToBytes(h)
 	} else {
 		h := wyhash.NewDefault()
