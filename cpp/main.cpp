@@ -65,7 +65,7 @@ bool parseArgs(int argc, char *argv[], Args &args) {
     return true;
 }
 
-std::vector<uint8_t> getHash(char* payload, size_t size, Args& args) {
+std::vector<uint8_t> getHash(char* payload, size_t size, Args args) {
     
     if (args.isSha256) {
         if (size == 0){
@@ -99,7 +99,7 @@ std::vector<uint8_t> getHash(char* payload, size_t size, Args& args) {
     }
 }
 
-std::string printHex(std::vector<uint8_t>& hash, Args& args) {
+std::string printHex(std::vector<uint8_t>& hash, Args args) {
     std::stringstream ss;
     
     for (int i=0; i<hash.size(); i++) {
@@ -114,7 +114,7 @@ std::string printHex(std::vector<uint8_t>& hash, Args& args) {
     return ss.str();
 }
 
-void worker(std::vector<Task>& tasks, int start, int end, Args& args) {
+void worker(std::vector<Task>& tasks, int start, int end, Args args) {
     char buffer[1024*1024];
     size_t prev_size = 1024*1024;
     char* buffer_ref = (char*) &buffer;
@@ -160,6 +160,9 @@ void worker(std::vector<Task>& tasks, int start, int end, Args& args) {
 int main(int argc, char *argv[]) {
 
     Args args;
+    args.isColon = false;
+    args.isStrict = false;
+    args.isSha256 = false;
     args.concurrentHandles = 10;
 
     if(!parseArgs(argc, argv, args)) {
@@ -184,7 +187,7 @@ int main(int argc, char *argv[]) {
     std::vector<std::thread> workers;
     for(int start=0,end=0; end < tasks.size(); ) {
         end = std::min(start+chunk, (int)tasks.size());
-        workers.push_back(std::thread(worker, std::ref(tasks), start, end, std::ref(args)));
+        workers.push_back(std::thread(worker, std::ref(tasks), start, end, args));
         start = end;
     }
 
