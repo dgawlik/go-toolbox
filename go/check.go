@@ -17,16 +17,12 @@ import (
 	"github.com/zeebo/xxh3"
 	"github.com/zhangyunhao116/wyhash"
 	"github.com/zhenjl/cityhash"
+	"golang.org/x/exp/mmap"
 )
 
 type Task struct {
 	absolutePath string
 	hash         []byte
-}
-
-type Batch struct {
-	Tasks      []Task
-	FileBuffer []byte
 }
 
 type Input []string
@@ -38,16 +34,16 @@ type Args struct {
 	Xxh3       bool
 	City       bool
 	Metro      bool
+	Strict     bool
 }
 
 var args Args
 
-func check(path string, err error) {
-	if err != nil {
-		fmt.Printf("%s: %v\n", path, err)
-
-		panic(err)
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
+	return b
 }
 
 func uint64ToBytes(num uint64) []byte {
@@ -78,53 +74,58 @@ func fmtHex(num []byte) string {
 	return sb.String()
 }
 
-func getHashForFile(path string, buffer *[]byte, args Args) []byte {
+func getHashForFile(path string, args Args) ([]byte, error) {
 
 	f, err := os.Open(path)
-	check(path, err)
+	if err != nil {
+		return nil, err
+	}
 	defer f.Close()
 
-	info, err := f.Stat()
-	check(path, err)
-	size := int(info.Size()) + 1
-
-	if size > cap(*buffer) {
-		*buffer = make([]byte, size)
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, err
 	}
+	size := int(fi.Size())
 
-	data := (*buffer)[:0]
+	data := make([]byte, size)
 
-	err = nil
-	for {
-		n, err := f.Read(data[len(data):cap(data)])
-		data = data[:len(data)+n]
+	if size > 24*1024 {
+		f2, err := mmap.Open(path)
+		defer f2.Close()
+
 		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
-			break
+			return nil, err
+		}
+
+		_, err = f2.ReadAt(data, 0)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		_, err = f.ReadAt(data, 0)
+		if err != nil {
+			return nil, err
 		}
 	}
-
-	check(path, err)
 
 	if args.Sha256 {
 		h := sha256.New()
 		h.Write(data)
-		return h.Sum(nil)
+		return h.Sum(nil), nil
 	} else if args.Xxh3 {
 		h := xxh3.HashSeed(data, 1)
-		return uint64ToBytes(h)
+		return uint64ToBytes(h), nil
 	} else if args.City {
 		h := cityhash.CityHash64WithSeed(data, uint32(len(data)), 1)
-		return uint64ToBytes(h)
+		return uint64ToBytes(h), nil
 	} else if args.Metro {
 		h := metro.Hash64(data, 1)
-		return uint64ToBytes(h)
+		return uint64ToBytes(h), nil
 	} else {
 		h := wyhash.NewDefault()
 		h.Write(data)
-		return uint64ToBytes(h.Sum64())
+		return uint64ToBytes(h.Sum64()), nil
 	}
 }
 
@@ -181,33 +182,34 @@ func main() {
 		return
 	}
 
-	var batches []Batch
-
-	partSize := (len(tasks) + runtime.NumCPU() - 1) / runtime.NumCPU()
-	for it := 0; it < len(tasks); {
-
-		end := it + partSize
-		if it+partSize > len(tasks) {
-			end = len(tasks)
-		}
-
-		batch := Batch{tasks[it:end], make([]byte, 4096)}
-
-		batches = append(batches, batch)
-		it = end
-	}
+	partSize := len(tasks) / runtime.NumCPU()
 
 	var wg sync.WaitGroup
-	for i := 0; i < len(batches); i++ {
+	for start, end := 0, 0; end < len(tasks); {
+		end = min(start+partSize, len(tasks))
+
 		wg.Add(1)
 
-		go func(b *Batch) {
+		go func(tasks []Task) {
 			defer wg.Done()
 
-			for idx, _ := range b.Tasks {
-				b.Tasks[idx].hash = getHashForFile(b.Tasks[idx].absolutePath, &b.FileBuffer, args)
+			for idx, _ := range tasks {
+				ret, err := getHashForFile(tasks[idx].absolutePath, args)
+				if err != nil {
+					os.Stderr.WriteString(fmt.Sprintf("%s: %s\n", tasks[idx].absolutePath, err))
+
+					if args.Strict {
+						panic(err)
+					} else {
+						continue
+					}
+				}
+				tasks[idx].hash = ret
 			}
-		}(&batches[i])
+
+		}(tasks[start:end])
+
+		start = end
 	}
 
 	wg.Wait()
