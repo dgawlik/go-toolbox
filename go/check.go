@@ -2,7 +2,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -57,16 +56,19 @@ func uint64ToBytes(num uint64) []byte {
 	bt[5] = byte(num >> 40)
 	bt[6] = byte(num >> 48)
 	bt[7] = byte(num >> 56)
+
 	return bt
 }
 
-func fmtHex(num []byte) string {
+func fmtHex(num []byte, args Args) string {
 
 	var sb strings.Builder
+
 	for i, b := range num {
+
 		sb.WriteString(fmt.Sprintf("%02X", b))
 
-		if i < len(num)-1 {
+		if i < len(num)-1 && args.Colon {
 			sb.WriteString(":")
 		}
 	}
@@ -77,12 +79,14 @@ func fmtHex(num []byte) string {
 func getHashForFile(path string, args Args) ([]byte, error) {
 
 	f, err := os.Open(path)
+
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
 	fi, err := f.Stat()
+
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +94,8 @@ func getHashForFile(path string, args Args) ([]byte, error) {
 
 	data := make([]byte, size)
 
-	if size > 24*1024 {
+	if size > 4096 {
+
 		f2, err := mmap.Open(path)
 		defer f2.Close()
 
@@ -99,33 +104,47 @@ func getHashForFile(path string, args Args) ([]byte, error) {
 		}
 
 		_, err = f2.ReadAt(data, 0)
+
 		if err != nil {
 			return nil, err
 		}
 	} else {
+
 		_, err = f.ReadAt(data, 0)
+
 		if err != nil {
 			return nil, err
 		}
+
 	}
 
 	if args.Sha256 {
+
 		h := sha256.New()
 		h.Write(data)
 		return h.Sum(nil), nil
+
 	} else if args.Xxh3 {
+
 		h := xxh3.HashSeed(data, 1)
 		return uint64ToBytes(h), nil
+
 	} else if args.City {
+
 		h := cityhash.CityHash64WithSeed(data, uint32(len(data)), 1)
 		return uint64ToBytes(h), nil
+
 	} else if args.Metro {
+
 		h := metro.Hash64(data, 1)
 		return uint64ToBytes(h), nil
+
 	} else {
+
 		h := wyhash.NewDefault()
 		h.Write(data)
 		return uint64ToBytes(h.Sum64()), nil
+
 	}
 }
 
@@ -166,6 +185,7 @@ func main() {
 	sort.Sort(&lines)
 
 	for _, l := range lines {
+
 		if l != "" {
 
 			if args.Sha256 {
@@ -178,6 +198,7 @@ func main() {
 	}
 
 	if len(tasks) == 0 {
+
 		fmt.Printf("%X\n", 0)
 		return
 	}
@@ -186,6 +207,7 @@ func main() {
 
 	var wg sync.WaitGroup
 	for start, end := 0, 0; end < len(tasks); {
+
 		end = min(start+partSize, len(tasks))
 
 		wg.Add(1)
@@ -194,7 +216,9 @@ func main() {
 			defer wg.Done()
 
 			for idx, _ := range tasks {
+
 				ret, err := getHashForFile(tasks[idx].absolutePath, args)
+
 				if err != nil {
 					os.Stderr.WriteString(fmt.Sprintf("%s: %s\n", tasks[idx].absolutePath, err))
 
@@ -214,18 +238,7 @@ func main() {
 
 	wg.Wait()
 
-	var sb strings.Builder
 	for _, task := range tasks {
-		if args.Colon {
-			sb.WriteString(fmtHex(task.hash))
-		} else {
-			sb.WriteString(hex.EncodeToString(task.hash))
-		}
-
-		sb.WriteString(" " + task.absolutePath)
-
-		sb.WriteString("\n")
+		fmt.Printf("%s %s\n", fmtHex(task.hash, args), task.absolutePath)
 	}
-
-	fmt.Print(sb.String())
 }
