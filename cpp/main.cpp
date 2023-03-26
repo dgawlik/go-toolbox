@@ -3,6 +3,8 @@
 #include <stdio.h>     
 #include <stdlib.h>
 #include <getopt.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 #include <vector>
 #include <iostream>
@@ -12,6 +14,7 @@
 #include <filesystem>
 #include <thread>
 #include <algorithm>
+#include <mutex>
 
 #include "deps/wyhash.h"
 #include "deps/hash_sha256.h"
@@ -29,6 +32,8 @@ typedef struct {
     std::string path;
     std::vector<uint8_t> hash;
 } Task;
+
+std::mutex read_mutex;
 
 bool parseArgs(int argc, char *argv[], Args &args) {
 
@@ -115,45 +120,70 @@ std::string printHex(std::vector<uint8_t>& hash, Args args) {
 }
 
 void worker(std::vector<Task>& tasks, int start, int end, Args args) {
-    char buffer[1024*1024];
-    size_t prev_size = 1024*1024;
-    char* buffer_ref = (char*) &buffer;
-    bool dynamic_alloc = false;
-   
+    int conc = args.concurrentHandles;
 
-    for (int i=start; i < end; i++) {
-        auto &t = tasks[i];
+    char* buffer = new char[1024*1024];
+
+    size_t prev_size = 1024*1024;
+
+
+    for (int i=start; i<end; i++) {
+        auto &t = tasks[i]; 
         try {
             auto canonical_path = fs::canonical(t.path);
             size_t size = fs::file_size(canonical_path);
 
             if(size > prev_size) {
                 prev_size = size;
-                if (dynamic_alloc) {
-                    delete buffer_ref;
-                }
-                buffer_ref = new char[size];
-                dynamic_alloc  = true;
+                delete buffer;
+                buffer = new char[size];
             }
 
-            std::ifstream file(canonical_path, std::ios_base::in | std::ios_base::binary ); 
-            file.exceptions(file.exceptions() | std::ifstream::failbit | std::ifstream::badbit);
-            file.read(buffer_ref, size);
+            int fd = open(canonical_path.c_str(), O_CLOEXEC, S_IRUSR);
+            if (fd == -1){
+                std::cerr << "Error opening file: " << canonical_path.c_str() << std::endl;
+                if (args.isStrict){
+                    exit(1);
+                }
+                continue;
+            }
 
-            t.hash = getHash(buffer_ref, size, args);
-            file.close();
+            bool finished = false;
+            size_t offset = 0;
+
+            while(!finished) {
+                finished = true;
+                int n = read(fd, &buffer[offset], size - offset + 1 );
+                
+                if (n == -1) {
+                    std::cerr << "Error reading file: " << t.path.c_str() << " " << errno << std::endl;
+                    if (args.isStrict){
+                        exit(1);
+                    }
+                    break;
+                }
+                offset += n;
+
+                if(offset != size) {
+                    finished = false;
+                }
+                else {
+                    t.hash = getHash(buffer, size, args);
+                }
+            }
+
+            if (fd != -1){
+                close(fd);
+            }
         }
         catch(const std::exception& ex) {
             std::cerr << t.path << ": " << ex.what() << std::endl;
             if (args.isStrict) {
                 exit(1);
             }
-        }
+        }   
     }
 
-    if (dynamic_alloc) {
-        delete buffer_ref;
-    }
 }
 
 
