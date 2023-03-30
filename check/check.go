@@ -2,9 +2,11 @@ package main
 
 import (
 	"crypto/sha256"
+	_ "embed"
 	"encoding/hex"
 	"fmt"
 	"io"
+	"math/big"
 	"os"
 	"reflect"
 	"regexp"
@@ -31,6 +33,7 @@ type Args struct {
 	Sha256     bool
 	Strict     bool
 	Check      string
+	Ref        string
 }
 
 var args Args
@@ -97,17 +100,21 @@ func getHashForFile(path string, args Args) ([]byte, error) {
 		return nil, err
 	}
 
+	return getHash(data, args), nil
+}
+
+func getHash(data []byte, args Args) []byte {
 	if args.Sha256 {
 
 		h := sha256.New()
 		h.Write(data)
-		return h.Sum(nil), nil
+		return h.Sum(nil)
 
 	} else {
 
 		h := wyhash.NewDefault()
 		h.Write(data)
-		return uint64ToBytes(h.Sum64()), nil
+		return uint64ToBytes(h.Sum64())
 
 	}
 }
@@ -167,7 +174,17 @@ func parseTask(s string, args Args) (Task, error) {
 
 }
 
+//go:embed words
+var words string
+var wordsFiltered []string
+
 func main() {
+
+	for _, word := range strings.Split(words, "\n") {
+		if !strings.Contains(word, "'s") {
+			wordsFiltered = append(wordsFiltered, word)
+		}
+	}
 
 	arg.MustParse(&args)
 
@@ -191,6 +208,40 @@ func main() {
 		}
 		defer f.Close()
 		data, err = io.ReadAll(f)
+	} else if args.Ref != "" {
+		f, err := os.Open(args.Ref)
+		if err != nil {
+			panic(fmt.Errorf("Cannot open file at %s", args.Ref))
+		}
+		defer f.Close()
+		data, err = io.ReadAll(f)
+		if err != nil {
+			panic(fmt.Errorf("Cannot read file at %s", args.Ref))
+		}
+
+		var number *big.Int = new(big.Int)
+		number.SetBytes(getHash(data, args))
+
+		var divisor *big.Int = new(big.Int)
+		divisor.SetInt64(int64(len(wordsFiltered)))
+
+		var quotient *big.Int = new(big.Int)
+		var remainder *big.Int = new(big.Int)
+
+		var codenames []string
+		for {
+			quotient, remainder = number.DivMod(number, divisor, divisor)
+			codenames = append(codenames, wordsFiltered[int(remainder.Int64())])
+
+			if quotient.Int64() == 0 {
+				break
+			} else {
+				number = quotient
+			}
+		}
+
+		fmt.Printf("[%s]\n", strings.Join(codenames, " "))
+		return
 	} else {
 		data, err = io.ReadAll(os.Stdin)
 	}
