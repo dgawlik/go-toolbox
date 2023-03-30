@@ -2,9 +2,12 @@ package main
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"reflect"
+	"regexp"
 	"runtime"
 	"runtime/pprof"
 	"sort"
@@ -26,10 +29,8 @@ type Args struct {
 	Colon      bool
 	Cpuprofile bool
 	Sha256     bool
-	Xxh3       bool
-	City       bool
-	Metro      bool
 	Strict     bool
+	Check      string
 }
 
 var args Args
@@ -123,6 +124,49 @@ func (i *Input) Less(l, r int) bool {
 	return (*i)[l] < (*i)[r]
 }
 
+func parseTask(s string, args Args) (Task, error) {
+	parts := regexp.MustCompile("\\s+").Split(s, -1)
+
+	if args.Check != "" {
+		if len(parts) != 2 {
+			return Task{}, fmt.Errorf("Incorrect line format")
+		}
+
+		path := parts[1]
+		hashHex := strings.Replace(parts[0], ":", "", -1)
+
+		hash, err := hex.DecodeString(hashHex)
+		if err != nil {
+			return Task{}, fmt.Errorf("Unable to decode hex: %s", hashHex)
+		}
+
+		if args.Sha256 {
+			if len(hash) != 32 {
+				return Task{}, fmt.Errorf("Hash should have 32 bytes")
+			}
+
+			return Task{path, hash}, nil
+		} else {
+			if len(hash) != 8 {
+				return Task{}, fmt.Errorf("Hash should have 8 bytes")
+			}
+
+			return Task{path, hash}, nil
+		}
+	} else {
+		if len(parts) != 1 {
+			return Task{}, fmt.Errorf("Incorrect line format")
+		}
+
+		if args.Sha256 {
+			return Task{parts[0], make([]byte, 32)}, nil
+		} else {
+			return Task{parts[0], make([]byte, 8)}, nil
+		}
+	}
+
+}
+
 func main() {
 
 	arg.MustParse(&args)
@@ -138,7 +182,18 @@ func main() {
 
 	var tasks []Task
 
-	data, err := io.ReadAll(os.Stdin)
+	var data []byte
+	var err error
+	if args.Check != "" {
+		f, err := os.Open(args.Check)
+		if err != nil {
+			panic(fmt.Errorf("Cannot open file at %s", args.Check))
+		}
+		defer f.Close()
+		data, err = io.ReadAll(f)
+	} else {
+		data, err = io.ReadAll(os.Stdin)
+	}
 
 	if err != nil {
 		panic(fmt.Errorf("Error reading stdin"))
@@ -150,13 +205,11 @@ func main() {
 	for _, l := range lines {
 
 		if l != "" {
-
-			if args.Sha256 {
-				tasks = append(tasks, Task{l, make([]byte, 32)})
-			} else {
-				tasks = append(tasks, Task{l, make([]byte, 8)})
+			task, err := parseTask(l, args)
+			if err != nil {
+				panic(err)
 			}
-
+			tasks = append(tasks, task)
 		}
 	}
 
@@ -169,6 +222,7 @@ func main() {
 	partSize := len(tasks) / runtime.NumCPU()
 
 	var wg sync.WaitGroup
+	differs := false
 	for start, end := 0, 0; end < len(tasks); {
 
 		end = min(start+partSize, len(tasks))
@@ -191,7 +245,14 @@ func main() {
 						continue
 					}
 				}
-				tasks[idx].hash = ret
+
+				if args.Check != "" && !reflect.DeepEqual(tasks[idx].hash, ret) {
+					fmt.Printf("!! %s\n", tasks[idx].absolutePath)
+					differs = true
+				} else {
+					tasks[idx].hash = ret
+				}
+
 			}
 
 		}(tasks[start:end])
@@ -201,7 +262,16 @@ func main() {
 
 	wg.Wait()
 
-	for _, task := range tasks {
-		fmt.Printf("%s %s\n", fmtHex(task.hash, args), task.absolutePath)
+	if args.Check != "" {
+		if differs {
+			fmt.Println("Failure")
+		} else {
+			fmt.Println("Success")
+		}
+	} else {
+		for _, task := range tasks {
+			fmt.Printf("%s %s\n", fmtHex(task.hash, args), task.absolutePath)
+		}
 	}
+
 }
